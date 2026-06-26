@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bomberCAT</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(800px 600px at 50% 42%, #1b1b1b 0%, #090909 72%);
+    min-height:100%; display:flex; align-items:center; justify-content:center;
+    padding:10px; font-family:ui-monospace,Menlo,Consolas,monospace;
+  }
+
+  /* a tv inteira e uma imagem pixel-art; o jogo entra no buraco da tela.
+     ocupa o maximo possivel: limitada pela largura (96vw) e pela altura (96vh) da janela */
+  .tv{ position:relative; width:min(1280px, 96vw, calc(96vh * 1.179)); }
+  .tv .frame{
+    display:block; width:100%; height:auto;
+    image-rendering:pixelated; image-rendering:crisp-edges;
+    filter:drop-shadow(0 18px 30px rgba(0,0,0,.55));
+  }
+
+  /* buraco da tela (coordenadas vindas da geracao da moldura) */
+  .screen{
+    position:absolute; left:9.7826%; top:30.7692%; width:60.8696%; height:53.8462%;
+    overflow:hidden; background:#000;
+  }
+  canvas#canvas{
+    display:block; width:100%; height:100%;
+    image-rendering:pixelated; image-rendering:crisp-edges; background:#000; outline:none;
+  }
+  /* riscos de crt e brilho de vidro, bem de leve */
+  .scanlines{
+    position:absolute; inset:0; pointer-events:none; z-index:3; opacity:.18;
+    background:repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px, rgba(0,0,0,.85) 3px);
+  }
+  .glass{
+    position:absolute; inset:0; pointer-events:none; z-index:2;
+    background:radial-gradient(120% 80% at 22% 10%, rgba(255,255,255,.10) 0, rgba(255,255,255,0) 45%);
+  }
+
+  /* "carregando" mudo: so um chuvisco de tv que some */
+  .loader{ position:absolute; inset:0; z-index:4; background:#000; transition:opacity .5s ease; }
+  .loader.hidden{ opacity:0; pointer-events:none; }
+  .loader .snow{
+    position:absolute; inset:0; opacity:.5;
+    background-image:radial-gradient(rgba(255,255,255,.9) 1px, transparent 1px);
+    background-size:3px 3px; animation:snow .25s steps(2) infinite;
+  }
+  .loader .dot{
+    position:absolute; left:50%; top:50%; width:8px; height:8px; margin:-4px 0 0 -4px;
+    background:#fff; border-radius:50%; animation:blink 1s steps(2) infinite;
+  }
+  @keyframes snow{ 50%{ background-position:1px 2px } }
+  @keyframes blink{ 50%{ opacity:.15 } }
+
+  /* efeito de desligar a tv (crt): overlay por cima do jogo. da uma piscada de
+     cor, colapsa numa cruz/estrela de 4 pontas, vira um pontinho e fica preto. */
+  .tvoff{ position:absolute; inset:0; z-index:7; display:none; background:#000; overflow:hidden; }
+  .tvoff.on{ display:block; }
+  .tvoff .flash{ position:absolute; inset:0; opacity:0; }
+  .tvoff.on .flash{ animation:tvflash .45s steps(1) forwards; }
+  @keyframes tvflash{
+    0%  { opacity:1; background:#fff; }
+    22% { opacity:.75; background:#ff37e6; }  /* glitch rosa */
+    40% { opacity:.7; background:#37f0ff; }   /* glitch ciano */
+    60% { opacity:0; }
+    100%{ opacity:0; }
+  }
+  /* os dois bracos da cruz. usam transform/opacity (rodam no compositor, fora da
+     thread principal) senao a animacao trava no meio enquanto o jogo roda. */
+  .tvoff .hbar, .tvoff .vbar{
+    position:absolute; inset:0; width:100%; height:100%; background:#fff;
+    transform-origin:center center; opacity:0;
+    box-shadow:0 0 16px 5px rgba(255,255,255,.7);
+    will-change:transform, opacity;
+  }
+  .tvoff.on .hbar{ animation:tvhbar .75s ease-in forwards; }
+  @keyframes tvhbar{
+    0%   { transform:scale(1, 1);        opacity:.95; }
+    22%  { transform:scale(1, 0.02);      opacity:1; }   /* vira linha horizontal */
+    55%  { transform:scale(1, 0.015);     opacity:1; }
+    58%  { transform:scale(0.04, 0.015);  opacity:1; }
+    82%  { transform:scale(0.05, 0.05);   opacity:1; }   /* vira pontinho */
+    100% { transform:scale(0, 0);         opacity:0; }   /* some de vez */
+  }
+  .tvoff.on .vbar{ animation:tvvbar .75s ease-in forwards; }
+  @keyframes tvvbar{
+    0%,16% { transform:scale(0, 0);       opacity:0; }
+    24%    { transform:scale(0.008, 1);    opacity:1; }   /* braco vertical = a cruz */
+    52%    { transform:scale(0.008, 0.4);  opacity:1; }
+    80%    { transform:scale(0.05, 0.05);  opacity:1; }
+    100%   { transform:scale(0, 0);        opacity:0; }
+  }
+  .standby{
+    position:absolute; inset:0; z-index:8; display:none;
+    flex-direction:column; align-items:center; justify-content:center; gap:14px;
+    background:#000; color:#5a5a5a; text-align:center; line-height:1.6;
+    font-size:11px; letter-spacing:1px;
+  }
+  .standby.show{ display:flex; animation:fadein .6s ease both; }
+  .standby .led{ width:7px; height:7px; border-radius:50%; background:#7a7a7a; animation:blink 1.4s steps(2) infinite; }
+  @keyframes fadein{ from{opacity:0} to{opacity:1} }
+</style>
+</head>
+<body>
+  <div class="tv">
+    <img class="frame" src="__MOLDURA_TV__" alt="">
+    <div class="screen">
+      <canvas id="canvas" width="640" height="480" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+      <div class="glass"></div>
+      <div class="scanlines"></div>
+      <div id="loader" class="loader">
+        <div class="snow"></div>
+        <div class="dot"></div>
+      </div>
+      <div id="tvoff" class="tvoff">
+        <div class="flash"></div>
+        <div class="hbar"></div>
+        <div class="vbar"></div>
+      </div>
+      <div id="standby" class="standby">
+        <div class="led"></div>
+        <div>tv desligada<br>pode fechar a aba :)</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var loaderEl = document.getElementById('loader');
+      var hidden = false;
+      function hideLoader() {
+        if (hidden) return;
+        hidden = true;
+        loaderEl.classList.add('hidden');
+      }
+      // impede que setas/espaco rolem a pagina enquanto joga
+      window.addEventListener('keydown', function (e) {
+        if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].indexOf(e.code) !== -1) {
+          e.preventDefault();
+        }
+      }, { passive: false });
+
+      // desliga a "tv" quando o jogo manda (botao sair) - o jogo ja toca o som
+      window.bcDesligar = function () {
+        var off = document.getElementById('tvoff');
+        if (!off || off.classList.contains('on')) return;
+        off.classList.add('on'); // dispara o colapso em cruz; o overlay fica preto no fim
+        setTimeout(function () {
+          var sb = document.getElementById('standby');
+          if (sb) sb.classList.add('show');
+          try { window.close(); } catch (e) {} // browser geralmente bloqueia fechar aba; ai fica o standby
+        }, 1000);
+      };
+
+      window.Module = {
+        canvas: (function () {
+          var c = document.getElementById('canvas');
+          c.addEventListener('click', function () { try { c.focus(); } catch (e) {} });
+          return c;
+        })(),
+        setStatus: function (text) { if (!text) hideLoader(); },
+        monitorRunDependencies: function (left) { if (!left) setTimeout(hideLoader, 300); },
+        print: function (t) { console.log(t); },
+        printErr: function (t) { console.error(t); }
+      };
+      // rede de seguranca: tira o chuvisco mesmo se algum callback nao disparar
+      window.addEventListener('load', function () {
+        setTimeout(function () { try { window.Module.canvas.focus(); } catch (e) {} }, 200);
+        setTimeout(hideLoader, 6000);
+      });
+    })();
+  </script>
+  <script>
