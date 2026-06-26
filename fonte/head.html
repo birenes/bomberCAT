@@ -156,6 +156,52 @@
         }, 1000);
       };
 
+      // ===== placar global (planilha do google via apps script) =====
+      var bcSheet = "https://script.google.com/macros/s/AKfycbwDlRyT0AA8a34F-M61gPVzftVO0GYMFa2ac2uSvk9cegj-AXyOCoaEAPeVON8Jb7jZ/exec";
+      var bcSegredo = "bc4t_pl4c4r_2026"; // chavinha pra dificultar pontuacao falsa (anti-trapaca casual)
+      var bcCb = 0;
+
+      function bcNormaliza(n) {
+        n = String(n == null ? '' : n).slice(0, 20).replace(/[\r\n\t:]/g, ' ').trim();
+        return n || 'jogador';
+      }
+      function bcToken(nome, pontos) {
+        var s = bcSegredo + '|' + nome + '|' + pontos, h = 2166136261;
+        for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+        return (h >>> 0).toString(16);
+      }
+
+      // le /ultimo.txt e manda a pontuacao pro placar global
+      window.bcEnviarPontuacao = function () {
+        try {
+          var t = FS.readFile('/ultimo.txt', { encoding: 'utf8' }).split('\n');
+          var nome = bcNormaliza(t[0]);
+          var pontos = parseInt(t[1], 10);
+          if (!isFinite(pontos)) return;
+          var body = 'nome=' + encodeURIComponent(nome) + '&pontos=' + pontos + '&token=' + bcToken(nome, pontos);
+          fetch(bcSheet, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+        } catch (e) {}
+      };
+
+      // busca o ranking global (jsonp pra fugir de cors) e escreve o top no arquivo que o jogo le
+      window.bcCarregarRanking = function () {
+        var nome = 'bcRank' + (++bcCb);
+        var s = document.createElement('script');
+        window[nome] = function (lista) {
+          try {
+            var top = (lista || []).slice(0, 3).map(function (r) {
+              return bcNormaliza(r.nome) + ': ' + (parseInt(r.pontos, 10) || 0);
+            });
+            FS.writeFile('/PlacarJogo.txt', top.length ? top.join('\n') + '\n' : '');
+          } catch (e) {}
+          delete window[nome];
+          if (s.parentNode) s.parentNode.removeChild(s);
+        };
+        s.onerror = function () { delete window[nome]; if (s.parentNode) s.parentNode.removeChild(s); };
+        s.src = bcSheet + '?callback=' + nome + '&t=' + Date.now();
+        document.head.appendChild(s);
+      };
+
       window.Module = {
         canvas: (function () {
           var c = document.getElementById('canvas');
@@ -171,6 +217,7 @@
       window.addEventListener('load', function () {
         setTimeout(function () { try { window.Module.canvas.focus(); } catch (e) {} }, 200);
         setTimeout(hideLoader, 6000);
+        setTimeout(function () { try { window.bcCarregarRanking(); } catch (e) {} }, 2500); // pre-carrega o ranking global
       });
     })();
   </script>

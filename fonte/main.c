@@ -590,26 +590,17 @@ void atualizarJogo() {
 // Salva os dados do jogador no arquivo de texto
 int SalvarPlacar() {
     if(salvo == 0){
-        FILE *pont_arq = fopen("PlacarJogo.txt", "a+");
-        if (pont_arq == NULL) {
-            // Problema em abrir arquivo
-            return 3;
-        }
-
-        // salva o nome que a pessoa digitou; se nao digitou nada, vai como "jogador"
+        salvo = 1;
+        // nome que a pessoa digitou; se nao digitou nada, vai como "jogador"
         const char* nome = (strlen(nomeJogador) > 0) ? nomeJogador : "jogador";
 
-        char valor[100];
-        snprintf(valor, sizeof(valor), "%d", pontuacao_final);
-
-        char pontuacao_str[40];
-        snprintf(pontuacao_str, sizeof(pontuacao_str), "%s: %s\n", nome, valor);
-
-        fprintf(pont_arq, "%s", pontuacao_str);
-
-        salvo = 1;
-        contadorRecordes ++;
-        fclose(pont_arq);
+        // guarda o ultimo resultado num arquivinho e avisa o navegador pra
+        // mandar pro placar global (planilha do google)
+        FILE* ult = fopen("ultimo.txt", "w");
+        if (ult) { fprintf(ult, "%s\n%d\n", nome, pontuacao_final); fclose(ult); }
+#ifdef __EMSCRIPTEN__
+        emscripten_run_script("if(window.bcEnviarPontuacao)bcEnviarPontuacao()");
+#endif
     }
 }
 
@@ -789,6 +780,9 @@ int main(int argc, char* args[]) {
                                 break;
                             case SDLK_2:
                                 menuPrincipal = 2;
+#ifdef __EMSCRIPTEN__
+                                emscripten_run_script("if(window.bcCarregarRanking)bcCarregarRanking()"); // busca o ranking global
+#endif
                                 break;
                             case SDLK_3:
                                 // "sair" no navegador nao fecha um app, entao a gente desliga a tv:
